@@ -1,3 +1,6 @@
+> [!CAUTION]
+> This is fork of <https://github.com/mrosati84/Chromy> with some vibe-coded changes for my use-case.
+
 <div align="center">
   <img src="logo.png" width="300" alt="Chromy logo: a detective evidence board" />
 
