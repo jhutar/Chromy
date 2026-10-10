@@ -102,6 +102,7 @@ class HandlerTests(unittest.TestCase):
         ingest_file.assert_called_once_with(
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
+            None,
         )
         self.assertEqual(exit_code, 0)
         self.assertEqual(
@@ -109,6 +110,39 @@ class HandlerTests(unittest.TestCase):
             "Added 3 records from 'romeo_and_juliet.txt' to collection 'notes'.\n"
             "Imported 1 file(s) successfully; 0 failed.\n",
         )
+
+    def test_import_data_passes_metadata_to_every_file(self) -> None:
+        with patch(
+            "chromy.handlers.import_data.ingest_file",
+            return_value=3,
+        ) as ingest_file:
+            exit_code, output = _capture_output(
+                handle_import,
+                "notes",
+                ["romeo_and_juliet.txt"],
+                "ticket=PROJ-123,file_name=/files/PROJ-123.md",
+            )
+
+        ingest_file.assert_called_once_with(
+            "notes",
+            self._fixture_path("romeo_and_juliet.txt"),
+            {"ticket": "PROJ-123", "file_name": "/files/PROJ-123.md"},
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output,
+            "Added 3 records from 'romeo_and_juliet.txt' to collection 'notes'.\n"
+            "Imported 1 file(s) successfully; 0 failed.\n",
+        )
+
+    def test_import_data_parse_error_aborts_run(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Invalid --metadata value"):
+            _capture_output(
+                handle_import,
+                "notes",
+                ["romeo_and_juliet.txt"],
+                "ticket",
+            )
 
     def test_import_data_continues_after_missing_file(self) -> None:
         with patch(
@@ -124,6 +158,7 @@ class HandlerTests(unittest.TestCase):
         ingest_file.assert_called_once_with(
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
+            None,
         )
         self.assertEqual(exit_code, 1)
         self.assertEqual(
@@ -165,6 +200,7 @@ class HandlerTests(unittest.TestCase):
         ingest_file.assert_called_once_with(
             "notes",
             self._fixture_path("README.md"),
+            None,
         )
         self.assertEqual(exit_code, 0)
         self.assertEqual(
@@ -246,10 +282,44 @@ class HandlerTests(unittest.TestCase):
                 "hello",
             )
 
-        run.assert_called_once_with("notes", "hello")
+        run.assert_called_once_with("notes", "hello", None)
         format_result.assert_called_once_with(query_result)
         self.assertEqual(exit_code, 0)
         self.assertEqual(output, "Query results:\n1\n")
+
+    def test_query_passes_where_filter(self) -> None:
+        query_result = {"ids": [["1"]], "documents": [["hello"]]}
+        with (
+            patch("chromy.handlers.query.run_query", return_value=query_result) as run,
+            patch(
+                "chromy.handlers.query.format_query_result",
+                return_value=["Query results:", "1"],
+            ) as format_result,
+        ):
+            exit_code, output = _capture_output(
+                handle_query,
+                "notes",
+                "hello",
+                "ticket=PROJ-123,content_type=comment",
+            )
+
+        run.assert_called_once_with(
+            "notes",
+            "hello",
+            {"ticket": "PROJ-123", "content_type": "comment"},
+        )
+        format_result.assert_called_once_with(query_result)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output, "Query results:\n1\n")
+
+    def test_query_parse_error_propagates(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Invalid --where value"):
+            _capture_output(
+                handle_query,
+                "notes",
+                "hello",
+                "ticket",
+            )
 
     def test_delete_records_parses_where_filter(self) -> None:
         with patch(
@@ -269,10 +339,31 @@ class HandlerTests(unittest.TestCase):
             "Deleted 2 record(s) from collection 'notes' where file_name=play.txt.\n",
         )
 
+    def test_delete_records_supports_multiple_pairs(self) -> None:
+        with patch(
+            "chromy.handlers.delete_collection.delete_data",
+            return_value=2,
+        ) as delete_data:
+            exit_code, output = _capture_output(
+                handle_delete_records,
+                "notes",
+                "a=1,b=sub=2",
+            )
+
+        delete_data.assert_called_once_with(
+            "notes",
+            {"a": "1", "b": "sub=2"},
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output,
+            "Deleted 2 record(s) from collection 'notes' where a=1, b=sub=2.\n",
+        )
+
     def test_delete_records_rejects_invalid_where_filter(self) -> None:
         with self.assertRaisesRegex(
             ValueError,
-            "Invalid --where value. Expected <condition>=<value>.",
+            "Invalid --where value. Expected comma-separated <key>=<value> pairs.",
         ):
             handle_delete_records("notes", "file_name")
 

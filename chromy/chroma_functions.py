@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import cast
@@ -109,9 +109,30 @@ def delete_collection(name: str) -> None:
     client.delete_collection(name=name)
 
 
-def delete_data(collection_name: str, where: dict[str, str]) -> int:
+def build_where(flat: Mapping[str, str]) -> Where:
+    """
+    Convert flat key-value pairs into a Chroma ``Where`` filter.
+
+    Chroma's ``validate_where`` requires exactly one key per dict level, so a
+    single pair is returned as-is while two or more pairs are wrapped in an
+    ``$and`` expression. This is shared by ``query_data`` and ``delete_data``.
+
+    Args:
+        flat (Mapping[str, str]): The parsed key-value pairs to filter on.
+
+    Returns:
+        Where: A Chroma-compatible ``Where`` expression.
+    """
+
+    if len(flat) == 1:
+        return cast(Where, dict(flat))
+
+    return cast(Where, {"$and": [{key: value} for key, value in flat.items()]})
+
+
+def delete_data(collection_name: str, where: Mapping[str, str]) -> int:
     _, collection = _get_client_and_collection(collection_name)
-    result = collection.delete(where=cast(Where, where))
+    result = collection.delete(where=build_where(where))
 
     return int(result.get("deleted", 0))
 
@@ -133,6 +154,7 @@ def add_data(
     collection_name: str,
     data: Sequence[EmbeddingRecord],
     file_name: str,
+    extra_metadata: Mapping[str, str] | None = None,
 ) -> None:
     if not data:
         return
@@ -140,16 +162,21 @@ def add_data(
     _, collection = _get_client_and_collection(collection_name)
 
     embeddings: list[Sequence[float]] = [record["embedding"] for record in data]
+    extra = dict(extra_metadata or {})
 
     collection.add(
         ids=[str(uuid4()) for _ in data],
-        metadatas=[{"file_name": file_name} for _ in data],
+        metadatas=[{**extra, "file_name": file_name} for _ in data],
         documents=[record["text"] for record in data],
         embeddings=embeddings,
     )
 
 
-def query_data(collection_name: str, texts: Sequence[str]) -> QueryResult:
+def query_data(
+    collection_name: str,
+    texts: Sequence[str],
+    where: Mapping[str, str] | None = None,
+) -> QueryResult:
     if not texts:
         return {
             "ids": [],
@@ -164,4 +191,7 @@ def query_data(collection_name: str, texts: Sequence[str]) -> QueryResult:
 
     _, collection = _get_client_and_collection(collection_name)
 
-    return collection.query(query_texts=list(texts))
+    if where is None:
+        return collection.query(query_texts=list(texts))
+
+    return collection.query(query_texts=list(texts), where=build_where(where))

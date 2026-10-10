@@ -23,6 +23,7 @@ be used by agentic coding tools through a skill (see the
 - [Configuration](#configuration)
 - [Commands](#commands)
 - [How ingestion works](#how-ingestion-works)
+- [Import metadata and filtering](#import-metadata-and-filtering)
 - [Local development](#local-development)
 
 ## What it does
@@ -253,9 +254,9 @@ list-collections | lc
 create-collection <collection> | cc <collection>
 delete-collection <collection> | dc <collection>
 count <collection> | c <collection>
-import <collection> <file> [<file> ...] | i <collection> <file> [<file> ...]
-query <collection> <query_text> | q <collection> <query_text>
-delete <collection> --where <condition>=<value> | del <collection> --where <condition>=<value>
+import <collection> <file> [<file> ...] [--metadata <key>=<value>[,...]] | i <collection> <file> [<file> ...] [--metadata <key>=<value>[,...]]
+query <collection> <query_text> [--where <key>=<value>[,...]] | q <collection> <query_text> [--where <key>=<value>[,...]]
+delete <collection> --where <key>=<value>[,...] | del <collection> --where <key>=<value>[,...]
 ```
 
 ### Aliases
@@ -288,6 +289,13 @@ chromy import notes *.md
 chromy i notes ./docs/example.txt
 ```
 
+Attach metadata to every chunk, overriding the document identity:
+
+```bash
+chromy import notes /tmp/randomname \
+    --metadata ticket=PROJ-123,file_name=/files/PROJ-123.md
+```
+
 Import a large batch of files with `find`:
 
 ```bash
@@ -306,6 +314,9 @@ Search the collection:
 
 ```bash
 chromy query notes "How do I configure this project?"
+# filter by metadata (multiple pairs are ANDed)
+chromy query notes "what is the status?" --where ticket=PROJ-123
+chromy query notes "any open items?" --where ticket=PROJ-123,content_type=comment
 # alias
 chromy q notes "How do I configure this project?"
 ```
@@ -326,10 +337,11 @@ chromy delete-collection notes
 chromy dc notes
 ```
 
-Delete records by metadata:
+Delete records by metadata (all pairs must match, AND):
 
 ```bash
 chromy delete notes --where file_name=/absolute/path/to/docs/example.txt
+chromy delete notes --where ticket=PROJ-123,content_type=stale
 # alias
 chromy del notes --where file_name=/absolute/path/to/docs/example.txt
 ```
@@ -342,11 +354,54 @@ When you run `import`, each file is:
 2. split into chunks
 3. embedded with Chroma's default embedding function
 4. inserted into the target collection with the source file's absolute path stored
-   in the `file_name` metadata field
+   in the `file_name` metadata field, plus any extra `--metadata` pairs.
 
 Importing the same absolute path again replaces that file's existing records in
-the collection. Query results include the stored document chunk, its ID,
-distance, and `file_name` metadata when available.
+the collection (delete-then-add). Query results include the stored document
+chunk, its ID, distance, and the `file_name` and any extra metadata fields when
+available.
+
+## Import metadata and filtering
+
+### `import --metadata`
+
+Attach comma-separated `key=value` pairs to every chunk of every imported file
+
+```bash
+chromy import tasks /tmp/tmp.123abc --metadata task_id=PROJ-123,file_name=/files/PROJ-123.md
+```
+
+- By default, `file_name` key is taken from actual file name.
+- The reserved `file_name` key overrides the document's logical identity: the
+  value becomes the chunk-replacement key and the stored `file_name` metadata
+  instead of the real absolute path. It is stored verbatim — it is a logical
+  identity (`/files/PROJ-123.md`, not necessarily a real file) — and must be
+  unique within a collection.
+- All non-reserved keys pass through to each chunk's metadata and are returned
+  by `query`.
+- Keys and values are trimmed; duplicate keys resolve to the last occurrence.
+- Values are stored as strings only, so filtering via `--where` is exact string
+  match; numeric or range comparisons are not supported.
+- A literal comma inside a value is not supported.
+- **Important:** two unrelated files imported with the same `file_name` override are
+  the same logical document — importing the second replaces the first's chunks
+  (the same delete-then-add behavior as re-importing one absolute path). This is
+  intentional.
+
+### `query --where` and `delete --where`
+
+Filter results or records by metadata with comma-separated `key=value` pairs;
+two or more pairs are combined with AND semantics:
+
+```bash
+chromy query tasks "what is the status?" --where task_id=PROJ-123
+chromy delete tasks --where task_id=PROJ-123,content_type=stale
+```
+
+- Parsing rules match `--metadata` (trimming, last-wins, malformed entries
+  rejected with exit code 1).
+- `query` without `--where` queries the whole database.
+- `delete` still requires `--where` and now accepts multiple pairs.
 
 ## Notes
 

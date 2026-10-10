@@ -159,11 +159,25 @@ def import_data(
             help="Path(s) to the file(s) to chunk and add to the collection."
         ),
     ],
+    metadata: Annotated[
+        str | None,
+        typer.Option(
+            "--metadata",
+            help=(
+                "Comma-separated key=value pairs to attach to every chunk, "
+                "e.g. 'ticket=PROJ-123'. The reserved 'file_name' key overrides "
+                "the document identity."
+            ),
+            metavar="KEY=VALUE[,KEY=VALUE...]",
+        ),
+    ] = None,
 ) -> None:
     try:
-        _run(lambda: handle_import(collection, files))
+        _run(lambda: handle_import(collection, files, metadata))
     except NotFoundError:
         _fail(f"Collection '{collection}' does not exist.")
+    except ValueError as exc:
+        _fail(str(exc))
 
 
 # ------------------------------------------------------------------------------
@@ -180,11 +194,24 @@ def query(
         str,
         typer.Argument(help="The text to query."),
     ],
+    where: Annotated[
+        str | None,
+        typer.Option(
+            "--where",
+            help=(
+                "Comma-separated key=value metadata filter, e.g. "
+                "'ticket=PROJ-123,content_type=comment'. Matches are ANDed."
+            ),
+            metavar="KEY=VALUE[,KEY=VALUE...]",
+        ),
+    ] = None,
 ) -> None:
     try:
-        _run(lambda: handle_query(collection, query_text))
+        _run(lambda: handle_query(collection, query_text, where))
     except NotFoundError:
         _fail(f"Collection '{collection}' does not exist.")
+    except ValueError as exc:
+        _fail(str(exc))
 
 
 # ------------------------------------------------------------------------------

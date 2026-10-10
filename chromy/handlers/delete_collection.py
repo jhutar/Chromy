@@ -3,21 +3,7 @@ from __future__ import annotations
 from rich import print
 
 from chromy.chroma_functions import delete_collection, delete_data
-
-
-def _parse_where_clause(where_clause: str) -> dict[str, str]:
-    condition, separator, value = where_clause.partition("=")
-
-    if separator == "":
-        raise ValueError("Invalid --where value. Expected <condition>=<value>.")
-
-    condition = condition.strip()
-    value = value.strip()
-
-    if not condition or not value:
-        raise ValueError("Invalid --where value. Expected <condition>=<value>.")
-
-    return {condition: value}
+from chromy.utilities import parse_key_value_pairs
 
 
 def handle_delete_collection(collection: str) -> int:
@@ -27,11 +13,11 @@ def handle_delete_collection(collection: str) -> int:
 
 
 def handle_delete_records(collection: str, where_clause: str) -> int:
-    where = _parse_where_clause(where_clause)
+    where = parse_key_value_pairs(where_clause, "--where")
     deleted = delete_data(collection, where)
-    condition, value = next(iter(where.items()))
+    where_desc = ", ".join(f"{key}={value}" for key, value in where.items())
     print(
         f"[bold green]Deleted[/] {deleted} record(s) from collection '{collection}' "
-        f"where {condition}={value}."
+        f"where {where_desc}."
     )
     return 0

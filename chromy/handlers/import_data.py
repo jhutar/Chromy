@@ -15,7 +15,7 @@ from rich.progress import (
 )
 
 from chromy.errors import UnsupportedTextFileError
-from chromy.utilities import ingest_file
+from chromy.utilities import ingest_file, parse_key_value_pairs
 
 from ..utilities import is_probably_text_file
 
@@ -41,7 +41,11 @@ def _get_absolute_path(file: str) -> str:
     return str(file_path.resolve())
 
 
-def _import_one(collection: str, file: str) -> int:
+def _import_one(
+    collection: str,
+    file: str,
+    metadata: dict[str, str] | None = None,
+) -> int:
     absolute_path = _get_absolute_path(file)
 
     if not Path(absolute_path).is_file():
@@ -50,7 +54,7 @@ def _import_one(collection: str, file: str) -> int:
     if not is_probably_text_file(absolute_path):
         raise UnsupportedTextFileError()
 
-    return ingest_file(collection, absolute_path)
+    return ingest_file(collection, absolute_path, metadata)
 
 
 def _should_show_progress(file_count: int) -> bool:
@@ -64,7 +68,17 @@ def _truncate_file_name(file_name: str, max_length: int = 20) -> str:
     return f"{file_name[: max_length - 3]}..."
 
 
-def handle_import(collection: str, files: list[str]) -> int:
+def handle_import(
+    collection: str,
+    files: list[str],
+    metadata_str: str | None = None,
+) -> int:
+    metadata = (
+        parse_key_value_pairs(metadata_str, "--metadata")
+        if metadata_str is not None
+        else None
+    )
+
     successful_imports = 0
     failed_imports = 0
     seen_paths: set[str] = set()
@@ -100,7 +114,7 @@ def handle_import(collection: str, files: list[str]) -> int:
             description = f"Importing [bold]{file_name}[/]..."
             progress.update(task_id, description=description)
             try:
-                records_added = _import_one(collection, file)
+                records_added = _import_one(collection, file, metadata)
                 successful_imports += 1
                 if not show_progress:
                     progress.console.print(

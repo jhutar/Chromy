@@ -152,6 +152,7 @@ class CliTests(unittest.TestCase):
             mocked.assert_called_once_with(
                 "notes",
                 self._fixture_path("romeo_and_juliet.txt"),
+                None,
             )
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(
@@ -174,7 +175,7 @@ class CliTests(unittest.TestCase):
             ):
                 result = _invoke(["q", "notes", "Where is Romeo?"])
 
-            mocked.assert_called_once_with("notes", "Where is Romeo?")
+            mocked.assert_called_once_with("notes", "Where is Romeo?", None)
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(result.stdout, "1\n")
 
@@ -205,12 +206,69 @@ class CliTests(unittest.TestCase):
         ingest_file.assert_called_once_with(
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
+            None,
         )
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(
             result.stdout,
             "Added 3 records from 'romeo_and_juliet.txt' to collection 'notes'.\n"
             "Imported 1 file(s) successfully; 0 failed.\n",
+        )
+
+    def test_import_data_trailing_metadata_option(self) -> None:
+        with patch(
+            "chromy.handlers.import_data.ingest_file",
+            return_value=3,
+        ) as ingest_file:
+            result = _invoke(
+                [
+                    "import",
+                    "notes",
+                    "romeo_and_juliet.txt",
+                    "--metadata",
+                    "ticket=PROJ-123,file_name=/files/PROJ-123.md",
+                ],
+            )
+
+        ingest_file.assert_called_once_with(
+            "notes",
+            self._fixture_path("romeo_and_juliet.txt"),
+            {"ticket": "PROJ-123", "file_name": "/files/PROJ-123.md"},
+        )
+        self.assertEqual(result.exit_code, 0)
+
+    def test_import_data_metadata_option_on_alias(self) -> None:
+        with patch(
+            "chromy.handlers.import_data.ingest_file",
+            return_value=3,
+        ) as ingest_file:
+            result = _invoke(
+                [
+                    "i",
+                    "notes",
+                    "romeo_and_juliet.txt",
+                    "--metadata",
+                    "ticket=PROJ-123",
+                ],
+            )
+
+        ingest_file.assert_called_once_with(
+            "notes",
+            self._fixture_path("romeo_and_juliet.txt"),
+            {"ticket": "PROJ-123"},
+        )
+        self.assertEqual(result.exit_code, 0)
+
+    def test_import_data_invalid_metadata_keeps_user_facing_error(self) -> None:
+        result = _invoke(
+            ["import", "notes", "romeo_and_juliet.txt", "--metadata", "ticket"]
+        )
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertEqual(
+            result.stdout,
+            "Error: Invalid --metadata value. Expected comma-separated "
+            "<key>=<value> pairs.\n",
         )
 
     def test_import_data_accepts_multiple_files(self) -> None:
@@ -226,10 +284,12 @@ class CliTests(unittest.TestCase):
         ingest_file.assert_any_call(
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
+            None,
         )
         ingest_file.assert_any_call(
             "notes",
             self._fixture_path("README.md"),
+            None,
         )
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(
@@ -251,6 +311,7 @@ class CliTests(unittest.TestCase):
         ingest_file.assert_called_once_with(
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
+            None,
         )
         self.assertEqual(result.exit_code, 1)
         self.assertEqual(
@@ -296,6 +357,7 @@ class CliTests(unittest.TestCase):
         ingest_file.assert_called_once_with(
             "notes",
             self._fixture_path("README.md"),
+            None,
         )
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(
@@ -316,10 +378,62 @@ class CliTests(unittest.TestCase):
         ):
             result = _invoke(["query", "notes", "Where is Romeo?"])
 
-        run.assert_called_once_with("notes", "Where is Romeo?")
+        run.assert_called_once_with("notes", "Where is Romeo?", None)
         format_result.assert_called_once_with(query_result)
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.stdout, "Query results:\n1\n")
+
+    def test_query_where_option(self) -> None:
+        query_result = {"ids": [["1"]], "documents": [["hello"]]}
+
+        with (
+            patch("chromy.handlers.query.run_query", return_value=query_result) as run,
+            patch(
+                "chromy.handlers.query.format_query_result",
+                return_value=["Query results:", "1"],
+            ),
+        ):
+            result = _invoke(
+                ["query", "notes", "Where is Romeo?", "--where", "ticket=PROJ-123"],
+            )
+
+        run.assert_called_once_with(
+            "notes",
+            "Where is Romeo?",
+            {"ticket": "PROJ-123"},
+        )
+        self.assertEqual(result.exit_code, 0)
+
+    def test_query_where_option_on_alias(self) -> None:
+        query_result = {"ids": [["1"]], "documents": [["hello"]]}
+
+        with (
+            patch("chromy.handlers.query.run_query", return_value=query_result) as run,
+            patch(
+                "chromy.handlers.query.format_query_result",
+                return_value=["Query results:", "1"],
+            ),
+        ):
+            result = _invoke(
+                ["q", "notes", "Where is Romeo?", "--where", "ticket=PROJ-123"],
+            )
+
+        run.assert_called_once_with(
+            "notes",
+            "Where is Romeo?",
+            {"ticket": "PROJ-123"},
+        )
+        self.assertEqual(result.exit_code, 0)
+
+    def test_query_invalid_where_keeps_user_facing_error(self) -> None:
+        result = _invoke(["query", "notes", "hello", "--where", "ticket"])
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertEqual(
+            result.stdout,
+            "Error: Invalid --where value. Expected comma-separated "
+            "<key>=<value> pairs.\n",
+        )
 
     def test_delete_records(self) -> None:
         with patch(
@@ -337,13 +451,33 @@ class CliTests(unittest.TestCase):
             "Deleted 2 record(s) from collection 'notes' where file_name=play.txt.\n",
         )
 
+    def test_delete_records_multi_key(self) -> None:
+        with patch(
+            "chromy.handlers.delete_collection.delete_data",
+            return_value=2,
+        ) as delete_data:
+            result = _invoke(
+                ["delete", "notes", "--where", "a=1,b=2"],
+            )
+
+        delete_data.assert_called_once_with(
+            "notes",
+            {"a": "1", "b": "2"},
+        )
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            result.stdout,
+            "Deleted 2 record(s) from collection 'notes' where a=1, b=2.\n",
+        )
+
     def test_invalid_delete_filter_keeps_user_facing_error(self) -> None:
         result = _invoke(["delete", "notes", "--where", "file_name"])
 
         self.assertEqual(result.exit_code, 1)
         self.assertEqual(
             result.stdout,
-            "Error: Invalid --where value. Expected <condition>=<value>.\n",
+            "Error: Invalid --where value. Expected comma-separated "
+            "<key>=<value> pairs.\n",
         )
 
     def test_delete_requires_where_option(self) -> None:

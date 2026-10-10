@@ -59,7 +59,18 @@ def format_query_result(result: QueryResult) -> list[Rule | Text]:
                 file_name = metadata.get("file_name")
 
                 if file_name:
-                    lines.append(Text.from_markup(f"\t[green]file_name[/]\t{file_name}"))
+                    lines.append(
+                        Text.from_markup(f"\t[green]file_name[/]\t{file_name}")
+                    )
+
+                extra_items = sorted(
+                    (str(key), value)
+                    for key, value in metadata.items()
+                    if key != "file_name"
+                )
+
+                for key, value in extra_items:
+                    lines.append(Text.from_markup(f"\t[green]{key}[/]\t{str(value)}"))
 
         if i < len(first_documents):
             lines.append(Text.from_markup("\n[bold green]Retrieved contents[/]\n"))
