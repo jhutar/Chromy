@@ -18,9 +18,24 @@ from chromy.errors import ChromaPathError
 CHROMA_FOLDER_ENV_VAR = "CHROMA_FOLDER"
 CHROMA_SUBDIRECTORY = "chroma"
 
+_chroma_folder_override: str | None = None
+
+
+def set_chroma_folder(value: str | None) -> None:
+    """Set the CLI-provided Chroma parent folder used by get_client()."""
+    global _chroma_folder_override
+    _chroma_folder_override = value
+
+
+def _configured_parent() -> str | None:
+    """Return the effective Chroma parent folder from CLI or env."""
+    if _chroma_folder_override is not None:
+        return _chroma_folder_override
+    return os.getenv(CHROMA_FOLDER_ENV_VAR)
+
 
 def _resolve_persistence_path() -> Path | None:
-    configured_parent = os.getenv(CHROMA_FOLDER_ENV_VAR)
+    configured_parent = _configured_parent()
 
     if configured_parent is None:
         return None
@@ -57,12 +72,13 @@ def _ensure_persistence_path_is_usable(path: Path, configured_parent: str) -> No
 
 
 def get_client() -> ClientAPI:
+    configured_parent = _configured_parent()
     persistence_path = _resolve_persistence_path()
 
     if persistence_path is None:
         return chromadb.PersistentClient()
 
-    configured_parent = os.getenv(CHROMA_FOLDER_ENV_VAR, "")
+    assert configured_parent is not None  # path exists only when parent set
     _ensure_persistence_path_is_usable(persistence_path, configured_parent)
 
     try:

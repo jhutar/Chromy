@@ -14,6 +14,11 @@ from chromy.errors import ChromaPathError
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import chromy.chroma_functions as chroma_functions
+
+        chroma_functions.set_chroma_folder(None)
+
     @staticmethod
     def _fixture_path(path: str) -> str:
         return str(Path(path).resolve())
@@ -32,7 +37,7 @@ class CliTests(unittest.TestCase):
         with patch(
             "chromy.handlers.list_collections.list_collections",
             return_value=["books", "code"],
-        ): 
+        ):
             result = _invoke(["list-collections"])
 
         self.assertEqual(result.exit_code, 0)
@@ -367,6 +372,33 @@ class CliTests(unittest.TestCase):
         self.assertIn("CHROMA_FOLDER", result.stdout)
         self.assertIn("parent directory", result.stdout)
         self.assertIn("<CHROMA_FOLDER>/chroma", result.stdout)
+
+    def test_cli_help_documents_chroma_folder_option(self) -> None:
+        result = _invoke(["--help"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("--chroma-folder", result.stdout)
+
+    def test_chroma_folder_option_wins_over_env_var(self) -> None:
+        import chromy.chroma_functions as chroma_functions
+
+        with (
+            patch(
+                "chromy.chroma_functions._ensure_persistence_path_is_usable"
+            ) as ensure_mock,
+            patch("chromy.chroma_functions.chromadb.PersistentClient") as client_mock,
+            patch.dict(
+                "os.environ", {chroma_functions.CHROMA_FOLDER_ENV_VAR: "/env/parent"}
+            ),
+        ):
+            client_mock_instance = client_mock.return_value
+            client_mock_instance.list_collections.return_value = []
+            result = _invoke(["--chroma-folder", "/flag/parent", "list-collections"])
+
+        self.assertEqual(result.exit_code, 0)
+        expected_path = Path("/flag/parent") / "chroma"
+        ensure_mock.assert_called_once_with(expected_path, "/flag/parent")
+        client_mock.assert_called_once_with(path=str(expected_path))
 
     def test_cli_help_documents_command_aliases(self) -> None:
         result = _invoke(["--help"])

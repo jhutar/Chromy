@@ -6,7 +6,7 @@ import typer
 from chromadb.errors import InternalError, NotFoundError
 from rich import print
 
-from chromy.chroma_functions import CHROMA_FOLDER_ENV_VAR
+from chromy.chroma_functions import CHROMA_FOLDER_ENV_VAR, set_chroma_folder
 from chromy.errors import ChromaPathError
 from chromy.handlers.count_collection import handle_count_collection
 from chromy.handlers.create_collection import handle_create_collection
@@ -23,7 +23,9 @@ app = typer.Typer(
         "Chromy, local RAG CLI based on Chromadb.\n\n"
         "Storage location:\n"
         "- By default, Chromy uses Chroma's default persistent location behavior.\n"
-        f"- Set {CHROMA_FOLDER_ENV_VAR} to a parent directory to override it.\n"
+        "- Override it with the --chroma-folder option or the CHROMA_FOLDER "
+        "environment variable (a parent directory); the option wins when "
+        "both are set.\n"
         f"- Chromy stores data in <{CHROMA_FOLDER_ENV_VAR}>/chroma.\n\n"
         "Command aliases:\n"
         "- list-collections: lc\n"
@@ -56,8 +58,22 @@ def _fail(message: str) -> None:
 
 
 @app.callback()
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    chroma_folder: Annotated[
+        str | None,
+        typer.Option(
+            "--chroma-folder",
+            help=(
+                "Parent directory for database storage. Overrides the "
+                f"{CHROMA_FOLDER_ENV_VAR} environment variable."
+            ),
+        ),
+    ] = None,
+) -> None:
     """Run the CLI and show help when no command is provided."""
+    if chroma_folder is not None:
+        set_chroma_folder(chroma_folder)
     if ctx.invoked_subcommand is None:
         print("[bold red]Error[/]: Missing command.")
         typer.echo(ctx.get_help())
