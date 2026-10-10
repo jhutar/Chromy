@@ -11,7 +11,7 @@ from chromy.chroma_functions import (
     query_data,
 )
 from chromy.chunking import chunk_file
-from chromy.embedding import embed
+from chromy.embedding import Embedder, embed
 
 
 def parse_key_value_pairs(s: str, option_name: str) -> dict[str, str]:
@@ -60,15 +60,34 @@ def ingest_file(
     collection_name: str,
     file_path: str,
     extra_metadata: dict[str, str] | None = None,
+    *,
+    embedding_function: Embedder,
+    chunk_size: int,
 ) -> int:
+    """
+    Chunk, embed, and add the file at ``file_path`` to ``collection_name``.
+
+    Args:
+        collection_name (str): The target collection.
+        file_path (str): The file to ingest.
+        extra_metadata (dict[str, str] | None): Extra metadata stored on each
+            record; a ``file_name`` entry overrides the path used for the
+            per-file dedup check.
+        embedding_function (EmbeddingFunction): The collection's embedder.
+        chunk_size (int): The per-chunk token budget for the collection's model.
+
+    Returns:
+        int: The number of records added.
+    """
+
     metadata = extra_metadata or {}
     effective_file_name = metadata.get("file_name", file_path)
 
     if has_data_for_file(collection_name, effective_file_name):
         delete_data(collection_name, {"file_name": effective_file_name})
 
-    chunks = chunk_file(file_path)
-    embeddings = embed(chunks)
+    chunks = chunk_file(file_path, chunk_size=chunk_size)
+    embeddings = embed(chunks, embedding_function=embedding_function)
     add_data(collection_name, embeddings, effective_file_name, metadata)
     return len(embeddings)
 

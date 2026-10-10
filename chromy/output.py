@@ -5,18 +5,35 @@ from collections.abc import Mapping, Sequence
 from chromadb import QueryResult
 from rich.console import Console
 from rich.rule import Rule
+from rich.table import Table
 from rich.text import Text
 
 CONSOLE = Console()
 
 
-def print_lines(lines: Sequence[Rule | Text | str]) -> None:
+def print_lines(lines: Sequence[Rule | Table | Text | str]) -> None:
     for line in lines:
         CONSOLE.print(line)
 
 
-def format_collection_names(collections: Sequence[str]) -> list[Text]:
-    return [Text(f"· {collection}") for collection in collections]
+def format_collection_table(collections: Sequence[tuple[str, str]]) -> Table:
+    """
+    Build a Rich table listing collection names and their embedding models.
+
+    Args:
+        collections (Sequence[tuple[str, str]]): Pairs of collection name and
+            embedding model spec.
+
+    Returns:
+        Table: The rendered table.
+    """
+
+    table = Table(title="Collections")
+    table.add_column("Name", style="bold", no_wrap=True)
+    table.add_column("Embedding model")
+    for name, model in collections:
+        table.add_row(name, model)
+    return table
 
 
 def format_count_message(collection_name: str, count: int) -> str:

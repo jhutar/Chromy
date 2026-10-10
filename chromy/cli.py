@@ -7,7 +7,8 @@ from chromadb.errors import InternalError, NotFoundError
 from rich import print
 
 from chromy.chroma_functions import CHROMA_FOLDER_ENV_VAR
-from chromy.errors import ChromaPathError
+from chromy.embedding.registry import MODEL_SPEC_EXAMPLES
+from chromy.errors import ChromaPathError, EmbeddingFunctionError
 from chromy.handlers.count_collection import handle_count_collection
 from chromy.handlers.create_collection import handle_create_collection
 from chromy.handlers.delete_collection import (
@@ -45,6 +46,8 @@ def _run(handler: ExitCodeHandler) -> None:
     try:
         exit_code = handler()
     except ChromaPathError as exc:
+        _fail(str(exc))
+    except EmbeddingFunctionError as exc:
         _fail(str(exc))
 
     if exit_code != 0:
@@ -90,9 +93,26 @@ def create_collection(
         str,
         typer.Argument(help="Name of the collection to create."),
     ],
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            help=f"Embedding model spec: {MODEL_SPEC_EXAMPLES}.",
+        ),
+    ] = "default",
+    max_tokens: Annotated[
+        int | None,
+        typer.Option(
+            "--max-tokens",
+            help=(
+                "Maximum input length for models that do not report one; "
+                "stored per collection."
+            ),
+        ),
+    ] = None,
 ) -> None:
     try:
-        _run(lambda: handle_create_collection(collection))
+        _run(lambda: handle_create_collection(collection, model, max_tokens))
     except InternalError:
         _fail(f"Collection '{collection}' already exists.")
 

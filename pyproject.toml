@@ -23,6 +23,11 @@ dependencies = [
 [project.scripts]
 chromy = "chromy.main:main"
 
+[project.optional-dependencies]
+models = [
+    "sentence-transformers",
+]
+
 [tool.setuptools]
 packages = ["chromy", "chromy.chunking", "chromy.embedding", "chromy.handlers"]
 

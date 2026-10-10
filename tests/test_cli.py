@@ -10,7 +10,7 @@ from click.testing import Result
 from typer.testing import CliRunner
 
 from chromy.cli import app
-from chromy.errors import ChromaPathError
+from chromy.errors import ChromaPathError, EmbeddingFunctionError
 
 
 class CliTests(unittest.TestCase):
@@ -31,12 +31,18 @@ class CliTests(unittest.TestCase):
     def test_list_existing_collections(self) -> None:
         with patch(
             "chromy.handlers.list_collections.list_collections",
-            return_value=["books", "code"],
+            return_value=[
+                ("books", "default"),
+                ("jira", "sentence-transformers:my-model"),
+            ],
         ):
             result = _invoke(["list-collections"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(result.stdout, "· books\n· code\n")
+        self.assertIn("books", result.stdout)
+        self.assertIn("jira", result.stdout)
+        self.assertIn("default", result.stdout)
+        self.assertIn("sentence-transformers:my-model", result.stdout)
 
     def test_create_collection(self) -> None:
         with patch(
@@ -45,9 +51,54 @@ class CliTests(unittest.TestCase):
         ) as create_collection:
             result = _invoke(["create-collection", "notes"])
 
-        create_collection.assert_called_once_with("notes")
+        create_collection.assert_called_once_with(
+            "notes",
+            model="default",
+            max_tokens=None,
+        )
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(result.stdout, "Created: collection 'notes'.\n")
+        self.assertEqual(
+            result.stdout,
+            "Created: collection 'notes' with embedding model 'default'.\n",
+        )
+
+    def test_create_collection_with_model_and_max_tokens(self) -> None:
+        with patch(
+            "chromy.handlers.create_collection.create_collection",
+            return_value="notes",
+        ) as create_collection:
+            result = _invoke(
+                [
+                    "create-collection",
+                    "notes",
+                    "--model",
+                    "sentence-transformers:all-MiniLM-L6-v2",
+                    "--max-tokens",
+                    "512",
+                ],
+            )
+
+        create_collection.assert_called_once_with(
+            "notes",
+            model="sentence-transformers:all-MiniLM-L6-v2",
+            max_tokens=512,
+        )
+        self.assertEqual(result.exit_code, 0)
+
+    def test_create_collection_surfaces_embedding_function_errors(self) -> None:
+        with patch(
+            "chromy.handlers.create_collection.create_collection",
+            side_effect=EmbeddingFunctionError("bad model"),
+        ) as create_collection:
+            result = _invoke(["create-collection", "notes", "--model", "bogus"])
+
+        create_collection.assert_called_once_with(
+            "notes",
+            model="bogus",
+            max_tokens=None,
+        )
+        self.assertEqual(result.exit_code, 1)
+        self.assertEqual(result.stdout, "Error: bad model\n")
 
     def test_create_collection_with_same_name(self) -> None:
         with patch(
@@ -56,7 +107,11 @@ class CliTests(unittest.TestCase):
         ) as create_collection:
             result = _invoke(["create-collection", "notes"])
 
-        create_collection.assert_called_once_with("notes")
+        create_collection.assert_called_once_with(
+            "notes",
+            model="default",
+            max_tokens=None,
+        )
         self.assertEqual(result.exit_code, 1)
         self.assertEqual(result.stdout, "Error: Collection 'notes' already exists.\n")
 
@@ -114,9 +169,12 @@ class CliTests(unittest.TestCase):
             ) as mocked:
                 result = _invoke(["cc", "notes"])
 
-            mocked.assert_called_once_with("notes")
+            mocked.assert_called_once_with("notes", model="default", max_tokens=None)
             self.assertEqual(result.exit_code, 0)
-            self.assertEqual(result.stdout, "Created: collection 'notes'.\n")
+            self.assertEqual(
+                result.stdout,
+                "Created: collection 'notes' with embedding model 'default'.\n",
+            )
 
         with self.subTest(alias="dc"):
             with patch(
@@ -143,16 +201,24 @@ class CliTests(unittest.TestCase):
             )
 
         with self.subTest(alias="i"):
-            with patch(
-                "chromy.handlers.import_data.ingest_file",
-                return_value=3,
-            ) as mocked:
+            with (
+                patch(
+                    "chromy.handlers.import_data.get_collection_embedding_context",
+                    return_value=("EMBEDDER", 204),
+                ),
+                patch(
+                    "chromy.handlers.import_data.ingest_file",
+                    return_value=3,
+                ) as mocked,
+            ):
                 result = _invoke(["i", "notes", "romeo_and_juliet.txt"])
 
             mocked.assert_called_once_with(
                 "notes",
                 self._fixture_path("romeo_and_juliet.txt"),
                 None,
+                embedding_function="EMBEDDER",
+                chunk_size=204,
             )
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(
@@ -197,16 +263,24 @@ class CliTests(unittest.TestCase):
             )
 
     def test_import_data(self) -> None:
-        with patch(
-            "chromy.handlers.import_data.ingest_file",
-            return_value=3,
-        ) as ingest_file:
+        with (
+            patch(
+                "chromy.handlers.import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
             result = _invoke(["import", "notes", "romeo_and_juliet.txt"])
 
         ingest_file.assert_called_once_with(
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
             None,
+            embedding_function="EMBEDDER",
+            chunk_size=204,
         )
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(
@@ -216,10 +290,16 @@ class CliTests(unittest.TestCase):
         )
 
     def test_import_data_trailing_metadata_option(self) -> None:
-        with patch(
-            "chromy.handlers.import_data.ingest_file",
-            return_value=3,
-        ) as ingest_file:
+        with (
+            patch(
+                "chromy.handlers.import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
             result = _invoke(
                 [
                     "import",
@@ -234,14 +314,22 @@ class CliTests(unittest.TestCase):
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
             {"ticket": "PROJ-123", "file_name": "/files/PROJ-123.md"},
+            embedding_function="EMBEDDER",
+            chunk_size=204,
         )
         self.assertEqual(result.exit_code, 0)
 
     def test_import_data_metadata_option_on_alias(self) -> None:
-        with patch(
-            "chromy.handlers.import_data.ingest_file",
-            return_value=3,
-        ) as ingest_file:
+        with (
+            patch(
+                "chromy.handlers.import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
             result = _invoke(
                 [
                     "i",
@@ -256,6 +344,8 @@ class CliTests(unittest.TestCase):
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
             {"ticket": "PROJ-123"},
+            embedding_function="EMBEDDER",
+            chunk_size=204,
         )
         self.assertEqual(result.exit_code, 0)
 
@@ -272,10 +362,16 @@ class CliTests(unittest.TestCase):
         )
 
     def test_import_data_accepts_multiple_files(self) -> None:
-        with patch(
-            "chromy.handlers.import_data.ingest_file",
-            side_effect=[3, 2],
-        ) as ingest_file:
+        with (
+            patch(
+                "chromy.handlers.import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                side_effect=[3, 2],
+            ) as ingest_file,
+        ):
             result = _invoke(
                 ["import", "notes", "romeo_and_juliet.txt", "README.md"],
             )
@@ -285,11 +381,15 @@ class CliTests(unittest.TestCase):
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
             None,
+            embedding_function="EMBEDDER",
+            chunk_size=204,
         )
         ingest_file.assert_any_call(
             "notes",
             self._fixture_path("README.md"),
             None,
+            embedding_function="EMBEDDER",
+            chunk_size=204,
         )
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(
@@ -300,10 +400,16 @@ class CliTests(unittest.TestCase):
         )
 
     def test_import_data_continues_after_missing_file(self) -> None:
-        with patch(
-            "chromy.handlers.import_data.ingest_file",
-            return_value=3,
-        ) as ingest_file:
+        with (
+            patch(
+                "chromy.handlers.import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
             result = _invoke(
                 ["import", "notes", "missing.txt", "romeo_and_juliet.txt"],
             )
@@ -312,6 +418,8 @@ class CliTests(unittest.TestCase):
             "notes",
             self._fixture_path("romeo_and_juliet.txt"),
             None,
+            embedding_function="EMBEDDER",
+            chunk_size=204,
         )
         self.assertEqual(result.exit_code, 1)
         self.assertEqual(
@@ -322,9 +430,15 @@ class CliTests(unittest.TestCase):
         )
 
     def test_import_data_rejects_non_text_files(self) -> None:
-        with patch(
-            "chromy.handlers.import_data.is_probably_text_file",
-            return_value=False,
+        with (
+            patch(
+                "chromy.handlers.import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.is_probably_text_file",
+                return_value=False,
+            ),
         ):
             result = _invoke(["import", "notes", "romeo_and_juliet.txt"])
 
@@ -336,7 +450,11 @@ class CliTests(unittest.TestCase):
         )
 
     def test_import_data_treats_literal_glob_as_missing_file(self) -> None:
-        result = _invoke(["import", "notes", "*.md"])
+        with patch(
+            "chromy.handlers.import_data.get_collection_embedding_context",
+            return_value=("EMBEDDER", 204),
+        ):
+            result = _invoke(["import", "notes", "*.md"])
 
         self.assertEqual(result.exit_code, 1)
         self.assertEqual(
@@ -346,10 +464,16 @@ class CliTests(unittest.TestCase):
         )
 
     def test_import_data_deduplicates_paths_within_single_invocation(self) -> None:
-        with patch(
-            "chromy.handlers.import_data.ingest_file",
-            return_value=3,
-        ) as ingest_file:
+        with (
+            patch(
+                "chromy.handlers.import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
             result = _invoke(
                 ["import", "notes", "README.md", "./README.md"],
             )
@@ -358,6 +482,8 @@ class CliTests(unittest.TestCase):
             "notes",
             self._fixture_path("README.md"),
             None,
+            embedding_function="EMBEDDER",
+            chunk_size=204,
         )
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(

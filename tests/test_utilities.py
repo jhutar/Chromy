@@ -61,6 +61,10 @@ class KeyValueParserTests(unittest.TestCase):
             parse_key_value_pairs("ticket", "--where")
 
 
+_EMBEDDING_FUNCTION = MagicMock(name="embedding_function")
+_CHUNK_SIZE = 128
+
+
 class UtilityTests(unittest.TestCase):
     def test_ingest_file_adds_new_file_without_deleting(self) -> None:
         chunks = ["chunk 1", "chunk 2"]
@@ -76,12 +80,17 @@ class UtilityTests(unittest.TestCase):
             patch("chromy.utilities.embed", return_value=embeddings) as embed,
             patch("chromy.utilities.add_data") as add_data,
         ):
-            records_added = ingest_file("notes", "/tmp/play.txt")
+            records_added = ingest_file(
+                "notes",
+                "/tmp/play.txt",
+                embedding_function=_EMBEDDING_FUNCTION,
+                chunk_size=_CHUNK_SIZE,
+            )
 
         has_data.assert_called_once_with("notes", "/tmp/play.txt")
         delete_data.assert_not_called()
-        chunk_file.assert_called_once_with("/tmp/play.txt")
-        embed.assert_called_once_with(chunks)
+        chunk_file.assert_called_once_with("/tmp/play.txt", chunk_size=_CHUNK_SIZE)
+        embed.assert_called_once_with(chunks, embedding_function=_EMBEDDING_FUNCTION)
         add_data.assert_called_once_with("notes", embeddings, "/tmp/play.txt", {})
         self.assertEqual(records_added, 2)
 
@@ -103,15 +112,20 @@ class UtilityTests(unittest.TestCase):
             manager.attach_mock(embed, "embed")
             manager.attach_mock(add_data, "add_data")
 
-            records_added = ingest_file("notes", "/tmp/play.txt")
+            records_added = ingest_file(
+                "notes",
+                "/tmp/play.txt",
+                embedding_function=_EMBEDDING_FUNCTION,
+                chunk_size=_CHUNK_SIZE,
+            )
 
         self.assertEqual(
             manager.mock_calls,
             [
                 call.has_data("notes", "/tmp/play.txt"),
                 call.delete_data("notes", {"file_name": "/tmp/play.txt"}),
-                call.chunk_file("/tmp/play.txt"),
-                call.embed(chunks),
+                call.chunk_file("/tmp/play.txt", chunk_size=_CHUNK_SIZE),
+                call.embed(chunks, embedding_function=_EMBEDDING_FUNCTION),
                 call.add_data("notes", embeddings, "/tmp/play.txt", {}),
             ],
         )
@@ -136,15 +150,21 @@ class UtilityTests(unittest.TestCase):
             manager.attach_mock(embed, "embed")
             manager.attach_mock(add_data, "add_data")
 
-            records_added = ingest_file("notes", "/tmp/play.txt", metadata)
+            records_added = ingest_file(
+                "notes",
+                "/tmp/play.txt",
+                metadata,
+                embedding_function=_EMBEDDING_FUNCTION,
+                chunk_size=_CHUNK_SIZE,
+            )
 
         self.assertEqual(
             manager.mock_calls,
             [
                 call.has_data("notes", "/files/PROJ-123.md"),
                 call.delete_data("notes", {"file_name": "/files/PROJ-123.md"}),
-                call.chunk_file("/tmp/play.txt"),
-                call.embed(chunks),
+                call.chunk_file("/tmp/play.txt", chunk_size=_CHUNK_SIZE),
+                call.embed(chunks, embedding_function=_EMBEDDING_FUNCTION),
                 call.add_data(
                     "notes",
                     embeddings,

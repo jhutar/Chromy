@@ -154,6 +154,37 @@ tree are picked up without reinstalling:
 uv tool install --editable .
 ```
 
+## Choosing an embedding model
+
+By default every collection uses Chroma's bundled ONNX MiniLM embedder
+(`all-MiniLM-L6-v2`, 384 dimensions). You can pick a different model per
+collection at creation time with the sentence-transformers backend:
+
+```bash
+chromy create-collection my-collection --model default
+chromy create-collection my-collection --model sentence-transformers:all-MiniLM-L6-v2
+```
+
+The embedding function is persisted with the collection and used for both
+importing and querying. `list-collections` shows each collection's model.
+
+These models do not report a maximum input length, so an explicit token limit
+is required, which drives chunking for that collection:
+
+```bash
+chromy create-collection my-collection --model sentence-transformers:all-MiniLM-L6-v2 --max-tokens 512
+```
+
+The model and vector dimensions are fixed at creation time; changing the model
+requires deleting and recreating the collection, then re-importing the data.
+
+Install the sentence-transformers backend (pulls PyTorch, heavy):
+
+```bash
+uv sync --extra models
+uv tool install '.[models]'     # standalone tool install with the model backend
+```
+
 ## Running the CLI
 
 The project entrypoint is available as the `chromy` command after installing the
@@ -351,8 +382,8 @@ chromy del notes --where file_name=/absolute/path/to/docs/example.txt
 When you run `import`, each file is:
 
 1. read from disk
-2. split into chunks
-3. embedded with Chroma's default embedding function
+2. split into chunks sized for the collection's embedding model
+3. embedded with the collection's embedding model
 4. inserted into the target collection with the source file's absolute path stored
    in the `file_name` metadata field, plus any extra `--metadata` pairs.
 

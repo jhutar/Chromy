@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from chromy.embedding import embed
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
+from chromy.embedding import (
+    MODEL_HEADROOM,
+    embed,
+    embedding_budget_tokens,
+)
+from chromy.errors import EmbeddingFunctionError
 
 
 class EmbedTest(unittest.TestCase):
@@ -24,6 +31,41 @@ class EmbedTest(unittest.TestCase):
                 {"text": "second", "embedding": [3.0, 4.0]},
             ],
         )
+
+    def test_embed_uses_explicit_embedding_function(self) -> None:
+        embedding_function = MagicMock(return_value=((9.0,),))
+        result = embed(["only"], embedding_function=embedding_function)
+
+        embedding_function.assert_called_once_with(["only"])
+        self.assertEqual(result, [{"text": "only", "embedding": [9.0]}])
+
+    def test_embedding_budget_tokens_scales_default_model_by_headroom(self) -> None:
+        self.assertEqual(
+            embedding_budget_tokens(DefaultEmbeddingFunction()),
+            max(1, int(DefaultEmbeddingFunction().max_tokens() * MODEL_HEADROOM)),
+        )
+
+    def test_embedding_budget_tokens_uses_explicit_model_limit(self) -> None:
+        embedding_function = MagicMock()
+        embedding_function.max_tokens.return_value = 512
+
+        self.assertEqual(embedding_budget_tokens(embedding_function), 409)
+
+    def test_embedding_budget_tokens_uses_override_for_model_without_limit(
+        self,
+    ) -> None:
+        embedding_function = MagicMock(spec=[])  # no max_tokens attribute
+        self.assertEqual(
+            embedding_budget_tokens(embedding_function, max_tokens=512), 409
+        )
+
+    def test_embedding_budget_tokens_raises_without_any_limit(self) -> None:
+        embedding_function = MagicMock(spec=[])
+        with self.assertRaisesRegex(
+            EmbeddingFunctionError,
+            "does not report a maximum input length",
+        ):
+            embedding_budget_tokens(embedding_function)
 
 
 if __name__ == "__main__":

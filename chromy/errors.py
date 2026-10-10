@@ -7,3 +7,10 @@ class UnsupportedTextFileError(Exception):
 
 class ChromaPathError(Exception):
     """Raised when the configured Chroma persistence path is invalid or unusable."""
+
+
+class EmbeddingFunctionError(Exception):
+    """
+    Raised when an embedding function cannot be built or its token budget cannot
+    be resolved.
+    """
