@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import tempfile
 import unittest
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -9,6 +10,7 @@ from typing import TypeVar
 from unittest.mock import MagicMock, patch
 
 from chromy.errors import EmbeddingFunctionError
+from chromy.handlers.batch_import_data import handle_batch_import
 from chromy.handlers.count_collection import handle_count_collection
 from chromy.handlers.create_collection import handle_create_collection
 from chromy.handlers.delete_collection import (
@@ -198,6 +200,18 @@ class HandlerTests(unittest.TestCase):
             "Added 3 records from 'romeo_and_juliet.txt' to collection 'notes'.\n"
             "Imported 1 file(s) successfully; 0 failed.\n",
         )
+
+    def test_import_data_rejects_metadata_with_multiple_files(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "--metadata is only supported when importing exactly one file.",
+        ):
+            _capture_output(
+                handle_import,
+                "notes",
+                ["romeo_and_juliet.txt", "README.md"],
+                "ticket=PROJ-123",
+            )
 
     def test_import_data_parse_error_aborts_run(self) -> None:
         with self.assertRaisesRegex(ValueError, "Invalid --metadata value"):
@@ -460,6 +474,243 @@ class HandlerTests(unittest.TestCase):
             "Invalid --where value. Expected comma-separated <key>=<value> pairs.",
         ):
             handle_delete_records("notes", "file_name")
+
+
+class BatchImportHandlerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.directory = Path(self._tmp.name)
+
+    def _write(self, name: str, content: str = "text") -> Path:
+        path = self.directory / name
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def _write_metadata_file(self, content: str, name: str = "meta.txt") -> Path:
+        path = self.directory / name
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_batch_import_uses_typed_input(self) -> None:
+        self._write("a.md")
+        self._write("b.md")
+        metadata_file = self._write_metadata_file("a.md ticket=A\nb.md ticket=B\n")
+
+        with (
+            patch(
+                "chromy.handlers.batch_import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
+            exit_code, output = _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+        ingest_file.assert_any_call(
+            "notes",
+            str(self.directory / "a.md"),
+            {"ticket": "A"},
+            embedding_function="EMBEDDER",
+            chunk_size=204,
+        )
+        ingest_file.assert_any_call(
+            "notes",
+            str(self.directory / "b.md"),
+            {"ticket": "B"},
+            embedding_function="EMBEDDER",
+            chunk_size=204,
+        )
+        self.assertEqual(ingest_file.call_count, 2)
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Imported 2 file(s) successfully; 0 failed.", output)
+
+    def test_batch_import_without_metadata_file(self) -> None:
+        self._write("a.md")
+
+        with (
+            patch(
+                "chromy.handlers.batch_import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
+            exit_code, _ = _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+            )
+
+        ingest_file.assert_called_once_with(
+            "notes",
+            str(self.directory / "a.md"),
+            None,
+            embedding_function="EMBEDDER",
+            chunk_size=204,
+        )
+        self.assertEqual(exit_code, 0)
+
+    def test_batch_import_excludes_metadata_file_in_directory(self) -> None:
+        self._write("a.md")
+        self._write_metadata_file("a.md ticket=A\n")
+
+        with (
+            patch(
+                "chromy.handlers.batch_import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
+            exit_code, _ = _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(self.directory / "meta.txt"),
+            )
+
+        ingest_file.assert_called_once()
+        self.assertEqual(exit_code, 0)
+
+    def test_batch_import_rejects_subdirectory(self) -> None:
+        self._write("a.md")
+        (self.directory / "sub").mkdir()
+
+        with self.assertRaisesRegex(
+            ValueError, "contains a subdirectory or non-file entry"
+        ):
+            _capture_output(handle_batch_import, "notes", str(self.directory))
+
+    def test_batch_import_rejects_missing_directory(self) -> None:
+        with self.assertRaisesRegex(ValueError, "does not exist or is not a directory"):
+            _capture_output(handle_batch_import, "notes", str(self.directory / "nope"))
+
+    def test_batch_import_rejects_missing_metadata_file(self) -> None:
+        self._write("a.md")
+
+        with self.assertRaisesRegex(FileNotFoundError, "was not found"):
+            _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(self.directory / "nope.txt"),
+            )
+
+    def test_batch_import_rejects_unlisted_file(self) -> None:
+        self._write("a.md")
+        self._write("b.md")
+        metadata_file = self._write_metadata_file("a.md ticket=A\n")
+
+        with self.assertRaisesRegex(ValueError, "not listed in the metadata file"):
+            _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+    def test_batch_import_rejects_missing_listed_file(self) -> None:
+        self._write("a.md")
+        metadata_file = self._write_metadata_file("a.md ticket=A\ngone.md x=1\n")
+
+        with self.assertRaisesRegex(ValueError, "are not in the directory"):
+            _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+    def test_batch_import_rejects_self_listed_metadata_file(self) -> None:
+        metadata_file = self._write_metadata_file("meta.txt ticket=A\n")
+
+        with self.assertRaisesRegex(ValueError, "are not in the directory"):
+            _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+    def test_batch_import_rejects_duplicate_file_name(self) -> None:
+        self._write("a.md")
+        metadata_file = self._write_metadata_file("a.md ticket=A\na.md ticket=B\n")
+
+        with self.assertRaisesRegex(ValueError, "Duplicate file name"):
+            _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+    def test_batch_import_rejects_malformed_line(self) -> None:
+        self._write("a.md")
+        metadata_file = self._write_metadata_file("a.md just-text\n")
+
+        with self.assertRaisesRegex(ValueError, "Invalid line 1"):
+            _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+    def test_batch_import_rejects_line_without_pairs(self) -> None:
+        self._write("a.md")
+        metadata_file = self._write_metadata_file("a.md\n")
+
+        with self.assertRaisesRegex(ValueError, "Invalid line 1"):
+            _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+    def test_batch_import_allows_comments_blank_lines_and_equals_in_values(
+        self,
+    ) -> None:
+        self._write("a.md")
+        metadata_file = self._write_metadata_file("# comment\n\na.md filter=a=b\n")
+
+        with (
+            patch(
+                "chromy.handlers.batch_import_data.get_collection_embedding_context",
+                return_value=("EMBEDDER", 204),
+            ),
+            patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file,
+        ):
+            exit_code, _ = _capture_output(
+                handle_batch_import,
+                "notes",
+                str(self.directory),
+                str(metadata_file),
+            )
+
+        ingest_file.assert_called_once_with(
+            "notes",
+            str(self.directory / "a.md"),
+            {"filter": "a=b"},
+            embedding_function="EMBEDDER",
+            chunk_size=204,
+        )
+        self.assertEqual(exit_code, 0)
 
 
 def _capture_output(

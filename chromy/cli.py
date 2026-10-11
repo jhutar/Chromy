@@ -9,6 +9,7 @@ from rich import print
 from chromy.chroma_functions import CHROMA_FOLDER_ENV_VAR, set_chroma_folder
 from chromy.embedding.registry import MODEL_SPEC_EXAMPLES
 from chromy.errors import ChromaPathError, EmbeddingFunctionError
+from chromy.handlers.batch_import_data import handle_batch_import
 from chromy.handlers.count_collection import handle_count_collection
 from chromy.handlers.create_collection import handle_create_collection
 from chromy.handlers.delete_collection import (
@@ -34,6 +35,7 @@ app = typer.Typer(
         "- delete-collection: dc\n"
         "- count: c\n"
         "- import: i\n"
+        "- batch-import: bi\n"
         "- query: q\n"
         "- delete: del"
     ),
@@ -212,6 +214,52 @@ def import_data(
         _run(lambda: handle_import(collection, files, metadata))
     except NotFoundError:
         _fail(f"Collection '{collection}' does not exist.")
+    except ValueError as exc:
+        _fail(str(exc))
+
+
+# ------------------------------------------------------------------------------
+# BATCH IMPORT DATA
+# ------------------------------------------------------------------------------
+@app.command("bi", help="Alias for batch-import.")
+@app.command(
+    "batch-import",
+    help=(
+        "Import every top-level file in a directory into a collection, "
+        "optionally with per-file metadata from a file. Alias: bi."
+    ),
+)
+def batch_import_data(
+    collection: Annotated[
+        str,
+        typer.Argument(help="Name of the target collection."),
+    ],
+    directory: Annotated[
+        str,
+        typer.Argument(
+            help=("Directory whose top-level files are imported (no recursion).")
+        ),
+    ],
+    metadata_file: Annotated[
+        str | None,
+        typer.Option(
+            "--metadata-file",
+            help=(
+                "File mapping file names to comma-separated key=value pairs, "
+                "one 'file_name k=v[,k=v...]' line per file; blank lines and "
+                "'#' comments are ignored. If given, every file in the "
+                "directory (except the metadata file itself) must be listed."
+            ),
+            metavar="FILE",
+        ),
+    ] = None,
+) -> None:
+    try:
+        _run(lambda: handle_batch_import(collection, directory, metadata_file))
+    except NotFoundError:
+        _fail(f"Collection '{collection}' does not exist.")
+    except FileNotFoundError as exc:
+        _fail(str(exc))
     except ValueError as exc:
         _fail(str(exc))
 

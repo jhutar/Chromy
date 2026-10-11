@@ -305,6 +305,7 @@ create-collection <collection> | cc <collection>
 delete-collection <collection> | dc <collection>
 count <collection> | c <collection>
 import <collection> <file> [<file> ...] [--metadata <key>=<value>[,...]] | i <collection> <file> [<file> ...] [--metadata <key>=<value>[,...]]
+batch-import <collection> <directory> [--metadata-file <file>] | bi <collection> <directory> [--metadata-file <file>]
 query <collection> <query_text> [--where <key>=<value>[,...]] | q <collection> <query_text> [--where <key>=<value>[,...]]
 delete <collection> --where <key>=<value>[,...] | del <collection> --where <key>=<value>[,...]
 ```
@@ -316,6 +317,7 @@ delete <collection> --where <key>=<value>[,...] | del <collection> --where <key>
 - `dc` → `delete-collection`
 - `c` → `count`
 - `i` → `import`
+- `bi` → `batch-import`
 - `q` → `query`
 - `del` → `delete`
 
@@ -345,6 +347,37 @@ Attach metadata to every chunk, overriding the document identity:
 chromy import notes /tmp/randomname \
     --metadata ticket=PROJ-123,file_name=/files/PROJ-123.md
 ```
+
+`--metadata` applies to a single import, so it requires exactly one file;
+importing several files with `--metadata` is an error (see `batch-import`
+for per-file metadata).
+
+Batch-import a directory of files with per-file metadata:
+
+```bash
+chromy batch-import notes ./docs \
+    --metadata-file ./docs/metadata.txt
+chromy batch-import notes ./docs   # no metadata
+# alias
+chromy bi notes ./docs
+```
+
+`metadata.txt` maps file names to comma-separated `key=value` pairs, one file
+per line:
+
+```text
+file1.md ticket=PROJ-123,content_type=comment
+file2.md ticket=PROJ-456
+```
+
+- Only the top level of the directory is scanned; subdirectories are an error.
+- If a metadata file is given, every file in the directory (except the
+  metadata file itself, if it lives inside the directory) must be listed, and
+  every listed file must exist — otherwise the command fails before
+  importing anything.
+- Blank lines and `#` comment lines are ignored; a line's file name and
+  metadata are separated by whitespace; values may contain `=` but not `,`.
+- Duplicate file names in the metadata file are an error.
 
 Import a large batch of files with `find`:
 
@@ -415,7 +448,9 @@ available.
 
 ### `import --metadata`
 
-Attach comma-separated `key=value` pairs to every chunk of every imported file
+Attach comma-separated `key=value` pairs to the chunks of the imported file.
+`--metadata` requires exactly one file — for per-file metadata across a
+directory, use `batch-import`:
 
 ```bash
 chromy import tasks /tmp/tmp.123abc --metadata task_id=PROJ-123,file_name=/files/PROJ-123.md

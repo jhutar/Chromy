@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
@@ -497,6 +498,147 @@ class CliTests(unittest.TestCase):
             "Imported 1 file(s) successfully; 0 failed.\n",
         )
 
+    def test_import_data_metadata_requires_single_file(self) -> None:
+        result = _invoke(
+            [
+                "import",
+                "notes",
+                "romeo_and_juliet.txt",
+                "README.md",
+                "--metadata",
+                "ticket=PROJ-123",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn(
+            "Error: --metadata is only supported when importing exactly one file.",
+            result.stdout,
+        )
+
+    def test_batch_import_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "a.md").write_text("a", encoding="utf-8")
+            (directory / "b.md").write_text("b", encoding="utf-8")
+            metadata_file = directory / "meta.txt"
+            metadata_file.write_text("a.md ticket=A\nb.md ticket=B\n", encoding="utf-8")
+
+            with (
+                patch(
+                    "chromy.handlers.batch_import_data.get_collection_embedding_context",
+                    return_value=("EMBEDDER", 204),
+                ),
+                patch(
+                    "chromy.handlers.import_data.ingest_file",
+                    return_value=3,
+                ) as ingest_file,
+            ):
+                result = _invoke(
+                    [
+                        "batch-import",
+                        "notes",
+                        str(directory),
+                        "--metadata-file",
+                        str(metadata_file),
+                    ],
+                )
+
+        ingest_file.assert_any_call(
+            "notes",
+            str(directory / "a.md"),
+            {"ticket": "A"},
+            embedding_function="EMBEDDER",
+            chunk_size=204,
+        )
+        ingest_file.assert_any_call(
+            "notes",
+            str(directory / "b.md"),
+            {"ticket": "B"},
+            embedding_function="EMBEDDER",
+            chunk_size=204,
+        )
+        self.assertEqual(ingest_file.call_count, 2)
+        self.assertEqual(result.exit_code, 0)
+
+    def test_batch_import_data_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "a.md").write_text("a", encoding="utf-8")
+
+            with (
+                patch(
+                    "chromy.handlers.batch_import_data.get_collection_embedding_context",
+                    return_value=("EMBEDDER", 204),
+                ),
+                patch(
+                    "chromy.handlers.import_data.ingest_file",
+                    return_value=3,
+                ) as ingest_file,
+            ):
+                result = _invoke(["bi", "notes", str(directory)])
+
+        ingest_file.assert_called_once_with(
+            "notes",
+            str(directory / "a.md"),
+            None,
+            embedding_function="EMBEDDER",
+            chunk_size=204,
+        )
+        self.assertEqual(result.exit_code, 0)
+
+    def test_batch_import_data_missing_directory(self) -> None:
+        result = _invoke(["batch-import", "notes", "/no/such/dir"])
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn(
+            "Error: The directory '/no/such/dir' does not exist", result.stdout
+        )
+
+    def test_batch_import_data_missing_metadata_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "a.md").write_text("a", encoding="utf-8")
+            result = _invoke(
+                [
+                    "batch-import",
+                    "notes",
+                    str(directory),
+                    "--metadata-file",
+                    str(directory / "nope.txt"),
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("Error: The metadata file", result.stdout)
+        self.assertIn("was not found", result.stdout)
+
+    def test_batch_import_data_unlisted_file_fails_without_importing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "a.md").write_text("a", encoding="utf-8")
+            (directory / "b.md").write_text("b", encoding="utf-8")
+            metadata_file = directory / "meta.txt"
+            metadata_file.write_text("a.md ticket=A\n", encoding="utf-8")
+
+            with patch(
+                "chromy.handlers.import_data.ingest_file",
+                return_value=3,
+            ) as ingest_file:
+                result = _invoke(
+                    [
+                        "batch-import",
+                        "notes",
+                        str(directory),
+                        "--metadata-file",
+                        str(metadata_file),
+                    ],
+                )
+
+        ingest_file.assert_not_called()
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("not listed in the metadata file", result.stdout)
+
     def test_query(self) -> None:
         query_result = {"ids": [["1"]], "documents": [["hello"]]}
 
@@ -670,6 +812,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("delete-collection: dc", result.stdout)
         self.assertIn("count: c", result.stdout)
         self.assertIn("import: i", result.stdout)
+        self.assertIn("batch-import: bi", result.stdout)
         self.assertIn("query: q", result.stdout)
         self.assertIn("delete: del", result.stdout)
 

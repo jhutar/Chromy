@@ -84,6 +84,12 @@ def handle_import(
     files: list[str],
     metadata_str: str | None = None,
 ) -> int:
+    if metadata_str is not None and len(files) != 1:
+        raise ValueError(
+            "--metadata is only supported when importing exactly one file. "
+            "Use batch-import for per-file metadata."
+        )
+
     metadata = (
         parse_key_value_pairs(metadata_str, "--metadata")
         if metadata_str is not None
