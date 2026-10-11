@@ -220,7 +220,8 @@ By default, Chromy uses Chroma's default persistent location behavior (a local
 `chroma/` directory based on your current working directory when you run the
 command).
 
-You can override this with `CHROMA_FOLDER`.
+You can override this with `CHROMA_FOLDER` environment variable or with
+`--chroma-folder` command line option.
 
 - `CHROMA_FOLDER` must point to a **parent directory**.
 - Chromy will store data in `<CHROMA_FOLDER>/chroma`.
