@@ -188,6 +188,16 @@ uv sync --extra models
 uv tool install '.[models]'     # standalone tool install with the model backend
 ```
 
+> **Note:** When using a `sentence-transformers:<model>` collection, every run
+> makes an online check to the Hugging Face Hub even though the model is cached
+> locally. If you are not authenticated, the Hub replies with a warning header
+> that Chromy prints, e.g.
+> `Warning: You are sending unauthenticated requests to the HF Hub. ...`.
+> To skip the Hub entirely and use only the local model cache, add
+> `HF_HUB_OFFLINE=1` to your `.env` (see [Configuration](#configuration)).
+> Do this after the model has been downloaded once, since offline mode fails
+> instead of downloading when a model is missing from the cache.
+
 ## Running the CLI
 
 The project entrypoint is available as the `chromy` command after installing the
@@ -213,6 +223,11 @@ to `.env` (which should remain uncommitted):
 ```dotenv
 CHROMA_FOLDER=/absolute/path/to/a/parent-directory
 ```
+
+Optionally, set `HF_HUB_OFFLINE=1` in `.env` to prevent sentence-transformers
+models from contacting the Hugging Face Hub; models are then loaded from the
+local cache only and the unauthenticated-request warning is suppressed (see
+[Choosing an embedding model](#choosing-an-embedding-model)).
 
 ### Chroma storage location
 
